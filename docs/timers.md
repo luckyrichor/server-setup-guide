@@ -21,6 +21,7 @@ CLI 更新服务超时 15 分钟，网络健康报告服务超时 4 分钟。
 | 系统级任务 | 频率/行为 |
 |---|---|
 | claude-webshare-watch（本次新增） | 每 30 秒，10 秒出口请求超时；状态机详见 webshare-watch.md |
+| claude-webshare-guard（常驻服务） | 故障期间每0.25秒清理可识别Claude进程；常用安装路径由AppArmor门禁提前拦截 |
 | mihomo-tx-health | 每 30 秒检查 TUN/DNS，故障时可能恢复普通代理 |
 | mihomo-tx-boot-confirm | 首次新版本重启确认窗口，超时恢复 |
 | tx-mihomo-activation-rollback | 激活配置后的恢复窗口；正常约15分钟，发布封装临时约20分钟 |

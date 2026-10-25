@@ -1,5 +1,5 @@
 [Unit]
-Description=Check Webshare and stop current Claude tasks once per outage
+Description=Check Webshare and block and stop Claude during outages
 Wants=network-online.target
 After=network-online.target
 
@@ -11,3 +11,4 @@ UMask=0077
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
+ReadWritePaths=/etc/apparmor.d/claude-webshare-gate

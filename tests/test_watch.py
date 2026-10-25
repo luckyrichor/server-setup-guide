@@ -11,6 +11,11 @@ spec.loader.exec_module(watch)
 
 
 class WatchTests(unittest.TestCase):
+    def setUp(self):
+        self.gate = patch.object(watch, 'set_gate')
+        self.gate_mock = self.gate.start()
+        self.addCleanup(self.gate.stop)
+
     def test_routes(self):
         proxies = {'ws': {'type': 'Socks5'}, 'airport': {'type': 'Selector', 'now':'node'},
                    'node': {'type':'Trojan'}, 'GLOBAL': {'type':'Selector','now':'ws'}}
@@ -20,7 +25,7 @@ class WatchTests(unittest.TestCase):
         self.assertFalse(watch.route_uses_webshare('direct',proxies,rules,{'ws'},'ifconfig.me'))
         self.assertTrue(watch.route_uses_webshare('global',proxies,rules,{'ws'},'ifconfig.me'))
 
-    def test_one_kill_per_incident_and_no_restart(self):
+    def test_continuous_kill_until_recovery_and_no_restart(self):
         with tempfile.TemporaryDirectory() as tmp:
             settings={'state_path':str(Path(tmp)/'state.json')}
             with patch.object(watch,'check',return_value=(False,'test failure')), \
@@ -29,13 +34,14 @@ class WatchTests(unittest.TestCase):
                  patch.object(watch,'notify',return_value=True):
                 watch.run(settings)
                 watch.run(settings)
-                self.assertEqual(kill.call_count,1)
+                self.assertEqual(kill.call_count,2)
                 with patch.object(watch,'check',return_value=(True,'recovered')):
                     watch.run(settings)
-                self.assertEqual(kill.call_count,1)
-                watch.run(settings)
                 self.assertEqual(kill.call_count,2)
-                self.assertEqual(snap.call_count,2)
+                watch.run(settings)
+                self.assertEqual(kill.call_count,3)
+                self.assertEqual(snap.call_count,3)
+                self.assertEqual([c.args[1] for c in self.gate_mock.call_args_list], [True,True,False,True])
 
     def test_failed_alert_retried_even_after_recovery(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -49,6 +55,24 @@ class WatchTests(unittest.TestCase):
                     watch.run(settings)
                 self.assertEqual(kill.call_count,1)
                 self.assertEqual(send.call_count,2)
+
+    def test_gate_failure_keeps_claude_blocked_and_stopped(self):
+        import json
+        with tempfile.TemporaryDirectory() as tmp:
+            settings={'state_path':str(Path(tmp)/'state.json')}
+            with patch.object(watch,'check',return_value=(True,'ok')), \
+                 patch.object(watch,'set_gate',side_effect=RuntimeError('gate failure')), \
+                 patch.object(watch,'snapshot',return_value=[]), \
+                 patch.object(watch,'kill_snapshot',return_value=([],[])) as kill, \
+                 patch.object(watch,'notify',return_value=True):
+                watch.run(settings)
+                self.assertFalse(json.loads(Path(settings['state_path']).read_text())['healthy'])
+                kill.assert_called_once()
+
+    def test_probe_only_never_changes_gate(self):
+        with patch.object(watch,'check',return_value=(False,'failed')):
+            self.assertEqual(watch.run({},probe_only=True),1)
+            self.gate_mock.assert_not_called()
 
     def test_real_pidfd_only_sacrificial_process(self):
         child=subprocess.Popen(['sleep','60'])

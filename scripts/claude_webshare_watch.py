@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One-shot Webshare check. Kill a snapshot once per incident; never gate launches."""
+"""Check Webshare, block Claude execution during outages, and stop its process trees."""
 import argparse
 import fcntl
 import ipaddress
@@ -160,6 +160,41 @@ def kill_snapshot(targets):
     return killed, failed
 
 
+# Native npm and standalone installs, including future versions in these layouts.
+GATE_PATTERNS = (
+    '/**/node_modules/@anthropic-ai/claude-code/bin/claude.exe',
+    '/**/.local/share/claude/versions/*',
+    '/usr/local/bin/claude',
+    '/usr/bin/claude',
+)
+
+
+def gate_profile(patterns=GATE_PATTERNS, prefix='claude-webshare-gate'):
+    return ''.join('profile '+prefix+'-'+str(i)+' "'+pattern+'" {\n'
+        '  deny /** mrwklx,\n  deny network,\n}\n'
+        for i, pattern in enumerate(patterns))
+
+
+def set_gate(settings, blocked):
+    """Persistent profile loads closed at boot; healthy checks unload it in kernel."""
+    profile = Path(settings.get('gate_profile', '/etc/apparmor.d/claude-webshare-gate'))
+    content = gate_profile()
+    if not profile.exists() or profile.read_text() != content:
+        profile.write_text(content)
+        profile.chmod(0o644)
+    # /sys is used to avoid treating an already-unloaded profile as an error.
+    loaded = Path('/sys/kernel/security/apparmor/profiles').read_text()
+    names = ['claude-webshare-gate-'+str(i) for i in range(len(GATE_PATTERNS))]
+    present = [name+' (enforce)' in loaded for name in names]
+    if (blocked and all(present)) or (not blocked and not any(present)):
+        return
+    result = subprocess.run(['/usr/sbin/apparmor_parser', '-K', '-r' if blocked else '-R', str(profile)],
+        capture_output=True, text=True, timeout=10)
+    if result.returncode:
+        raise RuntimeError('AppArmor 启动门禁更新失败')
+
+
+
 def decision(previous, healthy):
     return 'healthy' if healthy else ('ongoing' if previous.get('incident') else 'incident')
 
@@ -194,19 +229,34 @@ def run(settings, probe_only=False):
         previous = {}
     action = decision(previous, healthy)
     state = dict(previous, checked_at=time.time(), healthy=healthy, reason=reason)
+    # Publish recovery before unloading: the fallback must not kill newly allowed tasks.
+    if healthy:
+        atomic_json(path, state)
+    try:
+        set_gate(settings, not healthy)
+        state.pop('gate_error', None)
+        state['gate_blocked'] = not healthy
+    except (OSError, RuntimeError, subprocess.TimeoutExpired):
+        healthy = False
+        reason = '启动门禁更新失败；持续终止 Claude，需管理员检查 AppArmor'
+        action = decision(previous, healthy)
+        state.update(healthy=False, reason=reason, gate_error=True)
     if action == 'healthy':
         state['incident'] = False
         # Preserve an unsent outage alert even if network recovers before delivery.
-    elif action == 'incident':
+    else:
         targets = snapshot()
         killed, failed = kill_snapshot(targets)
+        state.update(last_killed=killed, kill_failed=failed)
+    if action == 'incident':
         incident_id = str(time.time_ns())
         state.update(incident=True, incident_id=incident_id, killed=killed, kill_failed=failed)
         state['pending_alert'] = {
             'id': incident_id,
             'text': 'Claude 网络第二跳检测失败：'+reason+'。已停止当时的 Claude CLI 及子进程 '
                 +str(len(killed))+' 个；停止失败 '+str(len(failed))+' 个。'
-                +'同一次故障不拦截后来启动的任务；恢复后不会自动重启旧任务。'}
+                +('启动门禁异常，正在持续清理新进程；请检查 AppArmor。' if state.get('gate_error')
+                  else '已启用故障期间启动拦截，检测恢复后才解除；不会自动重启旧任务。')}
     atomic_json(path, state)
     alert = state.get('pending_alert')
     if alert:
@@ -219,12 +269,28 @@ def run(settings, probe_only=False):
     return 0
 
 
+def guard(settings):
+    """Catch unrecognized executable layouts while blocked; normal paths are kernel gated."""
+    while True:
+        try:
+            state = json.loads(Path(settings['state_path']).read_text())
+            blocked = not state.get('healthy', False)
+        except (OSError, ValueError):
+            blocked = True
+        if blocked:
+            kill_snapshot(snapshot())
+        time.sleep(0.25)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config', required=True)
     parser.add_argument('--probe-only', action='store_true', help='no state change, kill or notification')
+    parser.add_argument('--guard', action='store_true', help='continuously stop Claude during failure')
     args = parser.parse_args()
     settings = json.loads(Path(args.config).read_text())
+    if args.guard:
+        return guard(settings)
     lock = Path(settings['state_path']).with_suffix('.lock')
     lock.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     with lock.open('w') as handle:

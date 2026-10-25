@@ -28,7 +28,7 @@ ifconfig.me 是现场两跳探测目标；api.ipify.org 通常沿原代理兜底
 | systemd PATH错误 | unit显式Node/lark-cli路径；不要依赖.bashrc |
 | 代理重启后SSH受影响 | VNC、回程保护、DNS恢复、cleanup_errors；不要清空未知网络规则 |
 | DNS启用仍有直连 | 系统例外、路由排除、应用DoH、容器及IPv6，需实际抓包验证 |
-| 后续Claude又启动 | 按用户最新要求允许；watcher同一次故障不重复停止，新故障才重新触发 |
+| 后续Claude又启动 | 故障期间不允许；检查AppArmor门禁是否加载、claude-webshare-guard.service是否运行、二进制安装路径是否匹配 |
 
 Claude网络中断后会话通常保存在本地；恢复时可以继续/恢复会话，但不保证最后一次请求未被服务端执行。
 超时后重复提交有重复操作风险；不要把请求失败等同于对方完全没收到。
