@@ -56,6 +56,27 @@ class WatchTests(unittest.TestCase):
                 self.assertEqual(kill.call_count,1)
                 self.assertEqual(send.call_count,2)
 
+    def test_recovery_notifies_once_and_retries_without_killing(self):
+        import json
+        with tempfile.TemporaryDirectory() as tmp:
+            settings={'state_path':str(Path(tmp)/'state.json')}
+            with patch.object(watch,'check',return_value=(True,'ok')), \
+                 patch.object(watch,'snapshot',return_value=[]), \
+                 patch.object(watch,'kill_snapshot',return_value=([],[])) as kill, \
+                 patch.object(watch,'notify',side_effect=[True,False,True]) as send:
+                watch.run(settings)  # Initial health is not a recovery.
+                send.assert_not_called()
+                with patch.object(watch,'check',return_value=(False,'failure')):
+                    watch.run(settings)
+                watch.run(settings)  # Recovery delivery fails, remains queued.
+                self.assertEqual(len(json.loads(Path(settings['state_path']).read_text())['pending_alerts']),1)
+                watch.run(settings)  # Retry succeeds with same idempotency key.
+                watch.run(settings)  # Continued health produces no duplicate.
+                self.assertEqual(send.call_count,3)
+                self.assertEqual(send.call_args_list[1].args[2],send.call_args_list[2].args[2])
+                self.assertIn('已恢复',send.call_args_list[1].args[1])
+                self.assertEqual(kill.call_count,1)
+
     def test_gate_failure_keeps_claude_blocked_and_stopped(self):
         import json
         with tempfile.TemporaryDirectory() as tmp:

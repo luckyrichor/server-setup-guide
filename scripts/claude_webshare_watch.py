@@ -241,9 +241,18 @@ def run(settings, probe_only=False):
         reason = '启动门禁更新失败；持续终止 Claude，需管理员检查 AppArmor'
         action = decision(previous, healthy)
         state.update(healthy=False, reason=reason, gate_error=True)
+    alerts = state.pop('pending_alerts', [])
+    # Migrate a pending notification written by the previous installed version.
+    legacy = state.pop('pending_alert', None)
+    if legacy:
+        alerts.append(legacy)
     if action == 'healthy':
         state['incident'] = False
-        # Preserve an unsent outage alert even if network recovers before delivery.
+        if previous.get('incident'):
+            alerts.append({
+                'id': str(previous.get('incident_id', time.time_ns())) + '-recovered',
+                'text': 'Claude 网络第二跳已恢复：Webshare 出口检测通过，启动拦截已解除。'
+                    '现在可以运行新的 Claude CLI 任务；此前停止的任务不会自动重启。'})
     else:
         targets = snapshot()
         killed, failed = kill_snapshot(targets)
@@ -251,18 +260,20 @@ def run(settings, probe_only=False):
     if action == 'incident':
         incident_id = str(time.time_ns())
         state.update(incident=True, incident_id=incident_id, killed=killed, kill_failed=failed)
-        state['pending_alert'] = {
+        alerts.append({
             'id': incident_id,
             'text': 'Claude 网络第二跳检测失败：'+reason+'。已停止当时的 Claude CLI 及子进程 '
                 +str(len(killed))+' 个；停止失败 '+str(len(failed))+' 个。'
                 +('启动门禁异常，正在持续清理新进程；请检查 AppArmor。' if state.get('gate_error')
-                  else '已启用故障期间启动拦截，检测恢复后才解除；不会自动重启旧任务。')}
+                  else '已启用故障期间启动拦截，检测恢复后才解除；不会自动重启旧任务。')})
+    state['pending_alerts'] = alerts
     atomic_json(path, state)
-    alert = state.get('pending_alert')
-    if alert:
+    # One delivery per run bounds notification time; preserve chronological events.
+    if alerts:
+        alert = alerts[0]
         state['notification_sent'] = notify(settings, alert['text'], alert['id'])
         if state['notification_sent']:
-            state.pop('pending_alert', None)
+            alerts.pop(0)
         atomic_json(path, state)
     print(json.dumps({k:state.get(k) for k in
         ('checked_at','healthy','reason','incident','notification_sent')}, ensure_ascii=False))
