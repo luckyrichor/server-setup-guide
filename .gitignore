@@ -6,3 +6,5 @@ credentials.json
 config.local.json
 reports/
 .feishu-*.md
+
+.feishu-links.json
