@@ -1,0 +1,11 @@
+[Unit]
+Description=Run sys checkcc checkws and send original output to Feishu
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/serveruser/.local/share/daily-system-check
+ExecStart=/usr/bin/python3 /home/serveruser/.local/share/daily-system-check/run.py
+TimeoutStartSec=4min
+UMask=0077

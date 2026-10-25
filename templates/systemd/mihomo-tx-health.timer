@@ -1,0 +1,10 @@
+# /etc/systemd/system/mihomo-tx-health.timer
+[Unit]
+Description=TX Mihomo health timer
+[Timer]
+OnActiveSec=30s
+OnUnitActiveSec=30s
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target

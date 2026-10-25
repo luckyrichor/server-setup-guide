@@ -1,0 +1,17 @@
+[Unit]
+Description=Lark Channel Bridge bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart="/home/serveruser/.nvm/versions/node/v24.21.0/bin/node" "/home/serveruser/.nvm/versions/node/v24.21.0/bin/lark-channel-bridge" run --profile claude
+Restart=always
+RestartSec=5
+StandardOutput=append:/home/serveruser/.lark-channel/profiles/claude/logs/daemon/daemon-stdout.log
+StandardError=append:/home/serveruser/.lark-channel/profiles/claude/logs/daemon/daemon-stderr.log
+Environment="PATH=/home/serveruser/.nvm/versions/node/v24.21.0/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin:/home/serveruser/.claude/remote/plugins/7bc7f4c3/09db6ebf60640435/bin:/home/serveruser/.claude/remote/plugins/7bc7f4c3/e2808f92d9ae293d/bin:/home/serveruser/.claude/remote/plugins/7bc7f4c3/e34fbc952366bcd9/bin:/home/serveruser/.claude/plugins/cache/claude-hud/claude-hud/0.8.0/bin"
+Environment="LARK_CHANNEL_HOME=/home/serveruser/.lark-channel"
+
+[Install]
+WantedBy=default.target

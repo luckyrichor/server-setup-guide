@@ -1,0 +1,12 @@
+[Unit]
+Description=Daily updatesanmao at 07:30 Beijing time
+
+[Timer]
+OnCalendar=*-*-* 07:30:00 Asia/Shanghai
+AccuracySec=1s
+RandomizedDelaySec=0
+Persistent=false
+Unit=updatesanmao-daily.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.env
+*.private.*
+credentials.json
+config.local.json
+reports/
+.feishu-*.md

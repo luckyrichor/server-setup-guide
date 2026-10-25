@@ -1,0 +1,11 @@
+# /etc/systemd/system/mihomo-tx-boot-confirm.timer
+[Unit]
+Description=TX first boot confirmation deadline
+
+[Timer]
+OnBootSec=10min
+AccuracySec=1s
+Unit=mihomo-tx-boot-confirm.service
+
+[Install]
+WantedBy=timers.target

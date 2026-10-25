@@ -1,0 +1,12 @@
+[Unit]
+Description=Daily system and Claude network checks at 10:00 Beijing time
+
+[Timer]
+OnCalendar=*-*-* 10:00:00 Asia/Shanghai
+AccuracySec=1s
+RandomizedDelaySec=0
+Persistent=false
+Unit=daily-system-check.service
+
+[Install]
+WantedBy=timers.target

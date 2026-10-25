@@ -1,0 +1,11 @@
+[Unit]
+Description=Check and update npm Codex CLI stable version weekly
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/serveruser/.local/share/codex-weekly-update
+ExecStart=/usr/bin/python3 /home/serveruser/.local/share/codex-weekly-update/run.py
+TimeoutStartSec=15min
+UMask=0077

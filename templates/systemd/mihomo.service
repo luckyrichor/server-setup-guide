@@ -1,0 +1,14 @@
+# /etc/systemd/system/mihomo.service
+[Unit]
+Description=Mihomo Proxy
+After=network.target
+
+[Service]
+Type=simple
+User=serveruser
+ExecStart=/usr/local/bin/mihomo -d /home/serveruser/.config/mihomo
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

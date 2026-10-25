@@ -1,0 +1,11 @@
+# /etc/systemd/system/mihomo-tx-health.service
+[Unit]
+Description=TX Mihomo health and recovery
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/mihomo-tx-control health
+TimeoutStartSec=180s
+
+# /etc/systemd/system/mihomo-tx-health.service.d/timeout.conf
+[Service]
+TimeoutStartSec=360s

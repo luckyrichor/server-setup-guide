@@ -1,0 +1,11 @@
+[Unit]
+Description=Ask Codex model identity and send result to Feishu
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/serveruser/.local/share/codex-model-check
+ExecStart=/usr/bin/python3 /home/serveruser/.local/share/codex-model-check/run.py
+TimeoutStartSec=5min
+UMask=0077

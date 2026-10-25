@@ -1,0 +1,13 @@
+# /etc/systemd/system/mihomo-tx-boot-confirm.service
+[Unit]
+Description=Restore stable TX proxy if first boot has not been confirmed
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/mihomo-tx-control boot-check
+TimeoutStartSec=180s
+
+# /etc/systemd/system/mihomo-tx-boot-confirm.service.d/timeout.conf
+[Service]
+TimeoutStartSec=360s

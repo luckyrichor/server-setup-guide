@@ -1,0 +1,11 @@
+[Unit]
+Description=Run updatesanmao and report download result to Feishu
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/serveruser/.local/share/updatesanmao-daily
+ExecStart=/usr/bin/python3 /home/serveruser/.local/share/updatesanmao-daily/run.py
+TimeoutStartSec=3min
+UMask=0077

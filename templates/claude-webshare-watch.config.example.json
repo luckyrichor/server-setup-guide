@@ -1,0 +1,22 @@
+{
+  "mihomo_config": "/var/lib/mihomo-tx/active/config.yaml",
+  "controller": "http://127.0.0.1:19090",
+  "proxy_url": "http://127.0.0.1:7890",
+  "probe_host": "ifconfig.me",
+  "probe_url": "https://ifconfig.me/ip",
+  "probe_timeout": 10,
+  "expected_ip": "192.0.2.10",
+  "webshare_server": "192.0.2.10",
+  "state_path": "/var/lib/claude-webshare-watch/state.json",
+  "chat_id": "REPLACE_PRIVATE_CHAT_ID",
+  "notification_user": "serveruser",
+  "notification_path": "/home/serveruser/.nvm/versions/node/v24.21.0/bin:/usr/local/bin:/usr/bin:/bin",
+  "lark_cli": "/home/serveruser/.nvm/versions/node/v24.21.0/bin/lark-cli",
+  "notification_env": {
+    "LARK_CHANNEL": "1",
+    "LARK_CHANNEL_HOME": "/home/serveruser/.lark-channel",
+    "LARK_CHANNEL_PROFILE": "codex",
+    "LARK_CHANNEL_CONFIG": "REPLACE_BOUND_SOURCE_PROJECTION",
+    "LARKSUITE_CLI_CONFIG_DIR": "/home/serveruser/.lark-channel/profiles/codex/lark-cli/lark-channel"
+  }
+}

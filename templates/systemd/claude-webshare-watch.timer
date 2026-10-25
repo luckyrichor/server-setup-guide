@@ -1,0 +1,12 @@
+[Unit]
+Description=Check Webshare every 30 seconds
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=30s
+AccuracySec=1s
+RandomizedDelaySec=0
+Unit=claude-webshare-watch.service
+
+[Install]
+WantedBy=timers.target
