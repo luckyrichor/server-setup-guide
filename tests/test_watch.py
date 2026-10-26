@@ -8,6 +8,7 @@ from unittest.mock import patch
 spec = importlib.util.spec_from_file_location('watch', Path(__file__).parents[1]/'scripts/claude_webshare_watch.py')
 watch = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(watch)
+REAL_DIAGNOSE = watch.diagnose
 
 
 class WatchTests(unittest.TestCase):
@@ -15,6 +16,9 @@ class WatchTests(unittest.TestCase):
         self.gate = patch.object(watch, 'set_gate')
         self.gate_mock = self.gate.start()
         self.addCleanup(self.gate.stop)
+        self.diag = patch.object(watch, 'diagnose', return_value={'summary':'isolated test diagnostic'})
+        self.diag_mock = self.diag.start()
+        self.addCleanup(self.diag.stop)
 
     def test_routes(self):
         proxies = {'ws': {'type': 'Socks5'}, 'airport': {'type': 'Selector', 'now':'node'},
@@ -94,6 +98,96 @@ class WatchTests(unittest.TestCase):
         with patch.object(watch,'check',return_value=(False,'failed')):
             self.assertEqual(watch.run({},probe_only=True),1)
             self.gate_mock.assert_not_called()
+
+    def test_diagnosis_happens_after_stop_and_persist(self):
+        import json
+        with tempfile.TemporaryDirectory() as tmp:
+            settings={'state_path':str(Path(tmp)/'state.json')}
+            with patch.object(watch,'check',return_value=(False,'failure')), \
+                 patch.object(watch,'snapshot',return_value=[]), \
+                 patch.object(watch,'kill_snapshot',return_value=([],[])) as kill, \
+                 patch.object(watch,'notify',return_value=True) as send:
+                def diagnosis(settings):
+                    kill.assert_called_once()
+                    self.assertTrue(self.gate_mock.call_args.args[1])
+                    self.assertFalse(json.loads(Path(settings['state_path']).read_text())['healthy'])
+                    return {'summary':'verified staged result'}
+                self.diag_mock.side_effect=diagnosis
+                watch.run(settings)
+                self.assertIn('verified staged result',send.call_args.args[1])
+                self.assertIn('diagnostics',json.loads(Path(settings['state_path']).read_text()))
+
+    def test_diagnostic_summary_does_not_overclaim(self):
+        text=watch.summarize_diagnostics({'ok':False},[
+            {'ok':False,'host':'ifconfig.me','stage':'webshare_socks','error_type':'TimeoutError'},
+            {'ok':True,'host':'api.ipify.org','stage':'complete'}])
+        self.assertIn('不能仅凭此确定',text)
+        self.assertIn('SOCKS握手未完成',text)
+        text=watch.summarize_diagnostics({'ok':True},[
+            {'ok':True,'host':'ifconfig.me'}, {'ok':True,'host':'api.ipify.org'}])
+        self.assertIn('不能追溯确定原故障段',text)
+
+    def test_diagnostic_timeout_is_bounded(self):
+        with patch.object(watch.subprocess,'run',side_effect=subprocess.TimeoutExpired('isolated',18)) as run:
+            # Bypass the setUp mock to exercise the actual wrapper.
+            result=REAL_DIAGNOSE({})
+            self.assertIn('超时',result['summary'])
+            self.assertEqual(run.call_args.kwargs['timeout'],18)
+
+    def test_trace_stages_and_no_secret_output(self):
+        import json
+        from unittest.mock import MagicMock
+        settings={'proxy_url':'http://127.0.0.1:7890','expected_ip':'192.0.2.10'}
+        node={'name':'ws','server':'192.0.2.10','port':1080,'dialer-proxy':'airport',
+              'username':'private-test-user','password':'private-test-password'}
+        proxies={'airport':{'type':'Selector','now':'first'}}
+        prefix=b'HTTP/1.1 200 Connection established\r\n\r\n'
+        cases=[('socks_timeout',b'', 'webshare_socks'),
+               ('auth_rejected',b'\x05\x02\x01\x01','webshare_auth'),
+               ('target_rejected',b'\x05\x02\x01\x00\x05\x04\x00\x01','webshare_to_target'),
+               ('tls_failure',b'\x05\x02\x01\x00\x05\x00\x00\x01'+b'\0'*6,'target_tls'),
+               ('http_failure',b'\x05\x02\x01\x00\x05\x00\x00\x01'+b'\0'*6,'target_http'),
+               ('success',b'\x05\x02\x01\x00\x05\x00\x00\x01'+b'\0'*6,'complete')]
+        for label,body,expected in cases:
+            with self.subTest(label=label):
+                stream=MagicMock();stream.getsockname.return_value=('127.0.0.1',4567)
+                data=bytearray(prefix+body)
+                def recv(n):
+                    if not data:raise TimeoutError('not exported')
+                    out=bytes(data[:n]);del data[:n];return out
+                stream.recv.side_effect=recv
+                context=MagicMock();context.wrap_socket.return_value=stream
+                if label=='tls_failure':context.wrap_socket.side_effect=watch.ssl.SSLError('not exported')
+                response=MagicMock();response.status=403 if label=='http_failure' else 200
+                response.read.return_value=b'192.0.2.10'
+                route={'connections':[{'metadata':{'sourcePort':'4567'},'chains':['first','airport']}]}
+                with patch.object(watch.socket,'create_connection',return_value=stream), \
+                     patch.object(watch,'diagnostic_api',return_value=route), \
+                     patch.object(watch.ssl,'create_default_context',return_value=context), \
+                     patch.object(watch.http.client,'HTTPResponse',return_value=response):
+                    result=watch.trace_webshare(settings,{},proxies,node,'ifconfig.me')
+                self.assertEqual(result['stage'],expected)
+                self.assertEqual(result['ok'],label=='success')
+                self.assertNotIn(node['username'],json.dumps(result))
+                self.assertNotIn(node['password'],json.dumps(result))
+
+    def test_trace_refuses_unconfirmed_route_and_skips_first_in_direct_mode(self):
+        from unittest.mock import MagicMock
+        settings={'proxy_url':'http://127.0.0.1:7890','expected_ip':'192.0.2.10'}
+        node={'name':'ws','server':'192.0.2.10','port':1080,'dialer-proxy':'DIRECT'}
+        self.assertIsNone(watch.trace_webshare(settings,{}, {},node,'ifconfig.me')['ok'])
+        node['dialer-proxy']='airport'
+        stream=MagicMock();stream.getsockname.return_value=('127.0.0.1',4567)
+        data=bytearray(b'HTTP/1.1 200 Connection established\r\n\r\n')
+        def recv(n):
+            out=bytes(data[:n]);del data[:n];return out
+        stream.recv.side_effect=recv
+        with patch.object(watch.socket,'create_connection',return_value=stream), \
+             patch.object(watch,'diagnostic_api',return_value={'connections':[{'metadata':{'sourcePort':4567},'chains':['DIRECT']}] }):
+            result=watch.trace_webshare(settings,{}, {'airport':{'type':'Selector','now':'first'}},node,'ifconfig.me')
+        self.assertIsNone(result['ok'])
+        self.assertEqual(result['stage'],'route_confirmation')
+        self.assertEqual(stream.sendall.call_count,1)  # No authentication sent.
 
     def test_real_pidfd_only_sacrificial_process(self):
         child=subprocess.Popen(['sleep','60'])

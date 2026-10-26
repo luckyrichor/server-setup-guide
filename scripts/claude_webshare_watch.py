@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """Check Webshare, block Claude execution during outages, and stop its process trees."""
 import argparse
+import concurrent.futures
+import http.client
+import socket
+import ssl
+import sys
+import urllib.parse
 import fcntl
 import ipaddress
 import json
@@ -84,7 +90,7 @@ def check(settings):
             '--noproxy', '', '--proxy', settings['proxy_url'], settings['probe_url']],
             capture_output=True, text=True, timeout=settings.get('probe_timeout', 10) + 2)
         if result.returncode:
-            return False, 'Webshare 出口请求失败或超时'
+            return False, 'Webshare 出口请求失败（curl返回码 '+str(result.returncode)+'：超时/连接/TLS/HTTP错误需分段诊断）'
         try:
             actual = str(ipaddress.ip_address(result.stdout.strip()))
         except ValueError:
@@ -101,6 +107,229 @@ def check(settings):
         return True, 'Webshare 出口已确认'
     except (OSError, ValueError, KeyError, TypeError, subprocess.TimeoutExpired, yaml.YAMLError):
         return False, '无法读取或确认代理运行状态'
+
+
+def diagnostic_api(settings, config, path, timeout=2):
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    request = urllib.request.Request(settings['controller'] + path,
+        headers={'Authorization': 'Bearer ' + str(config['secret'])})
+    with opener.open(request, timeout=timeout) as response:
+        return json.load(response)
+
+
+def first_hop_probe(settings, config, proxies, group):
+    selected = leaf(group, proxies)
+    if selected in (None, 'DIRECT', 'REJECT'):
+        return {'ok': None, 'stage': 'first_hop', 'detail': '未选择有效第一跳'}
+    try:
+        # The named-proxy delay API tests that outbound, without changing any selector.
+        path = '/proxies/' + urllib.parse.quote(selected, safe='') + '/delay?' + urllib.parse.urlencode({
+            'url': 'https://www.gstatic.com/generate_204', 'timeout': 3000})
+        result = diagnostic_api(settings, config, path, timeout=4)
+        ok = isinstance(result.get('delay'), (int, float)) and result['delay'] >= 0
+        return {'ok': ok, 'stage': 'first_hop', 'delay_ms': result.get('delay') if ok else None}
+    except (OSError, ValueError, KeyError, TypeError):
+        return {'ok': False, 'stage': 'first_hop', 'detail': '指定第一跳访问独立测试站失败，包含节点/其DNS或测试站问题'}
+
+
+def trace_webshare(settings, config, proxies, node, host):
+    """Trace SOCKS over an existing, API-verified first-hop route. Never modify routing."""
+    start = time.monotonic()
+    deadline = start + 8
+    stages, stream = {}, None
+    stage = 'local_proxy'
+    group = node.get('dialer-proxy')
+    if not group or group == 'DIRECT':
+        return {'ok': None, 'stage': 'not_chained', 'host': host,
+                'detail': '只走第二跳：无第一跳，不适用经第一跳的握手诊断'}
+    try:
+        try:
+            server = str(ipaddress.ip_address(node['server']))
+        except ValueError:
+            return {'ok': None, 'stage': 'unsupported', 'host': host,
+                    'detail': 'Webshare地址不是IP，暂不支持分离地址解析与连接诊断'}
+        url = urllib.parse.urlsplit(settings['proxy_url'])
+        if url.scheme != 'http' or url.username or url.password:
+            return {'ok': None, 'stage': 'unsupported', 'host': host, 'detail': '需无认证本机HTTP代理进行分段诊断'}
+        expected_first = leaf(group, proxies)
+
+        def remaining():
+            left = deadline - time.monotonic()
+            if left <= 0:
+                raise TimeoutError()
+            return min(3, left)
+
+        def send(data):
+            stream.settimeout(remaining())
+            stream.sendall(data)
+
+        def receive(count):
+            data = b''
+            while len(data) < count:
+                stream.settimeout(remaining())
+                chunk = stream.recv(count - len(data))
+                if not chunk:
+                    raise ConnectionError()
+                data += chunk
+            return data
+
+        def mark(name):
+            stages[name] = round(time.monotonic() - start, 3)
+
+        stream = socket.create_connection((url.hostname, url.port or 80), timeout=remaining())
+        source_port = stream.getsockname()[1]
+        mark('local_proxy')
+        stage = 'first_to_webshare'
+        authority = ('['+server+']' if ':' in server else server) + ':' + str(node['port'])
+        send(('CONNECT '+authority+' HTTP/1.1\r\nHost: '+authority+'\r\n\r\n').encode())
+        headers = b''
+        while not headers.endswith(b'\r\n\r\n'):
+            headers += receive(1)
+            if len(headers) > 8192:
+                raise ValueError()
+        if b' 200 ' not in headers.split(b'\r\n')[0]:
+            raise ConnectionError()
+        stage = 'route_confirmation'
+        chains = []
+        for attempt in range(4):
+            connections = diagnostic_api(settings, config, '/connections', timeout=remaining())['connections']
+            route = next((item for item in connections
+                if str(item.get('metadata', {}).get('sourcePort')) == str(source_port)), None)
+            chains = route.get('chains', []) if route else []
+            if chains:
+                break
+            time.sleep(0.05)  # CONNECT can precede registration in /connections.
+        if expected_first not in chains or node['name'] in chains:
+            return {'ok': None, 'stage': stage, 'host': host, 'elapsed': stages,
+                'detail': '诊断连接未确认沿同一第一跳，无法据此定位，不发送代理凭据'}
+        stage = 'webshare_socks'
+        send(b'\x05\x01\x02')
+        if receive(2) != b'\x05\x02':
+            return {'ok': False, 'stage': 'webshare_auth', 'host': host, 'elapsed': stages,
+                    'detail': 'Webshare未接受用户名密码认证方式'}
+        mark('webshare_socks')
+        stage = 'webshare_auth'
+        username = str(node['username']).encode()
+        password = str(node['password']).encode()
+        if len(username) > 255 or len(password) > 255:
+            raise ValueError()
+        send(bytes([1, len(username)]) + username + bytes([len(password)]) + password)
+        if receive(2) != b'\x01\x00':
+            return {'ok': False, 'stage': stage, 'host': host, 'elapsed': stages,
+                    'detail': 'Webshare明确拒绝认证（账号/密码/账户授权需检查）'}
+        mark(stage)
+        stage = 'webshare_to_target'
+        domain = host.encode('idna')
+        send(b'\x05\x01\x00\x03' + bytes([len(domain)]) + domain + b'\x01\xbb')
+        reply = receive(4)
+        if reply[1] != 0:
+            return {'ok': False, 'stage': stage, 'host': host, 'elapsed': stages,
+                    'detail': 'Webshare连接目标失败（含远端DNS），SOCKS返回码 '+str(reply[1])}
+        count = {1: 4, 4: 16}.get(reply[3])
+        count = receive(1)[0] if reply[3] == 3 else count
+        if count is None:
+            raise ValueError()
+        receive(count + 2)
+        mark(stage)
+        stage = 'target_tls'
+        stream.settimeout(remaining())
+        stream = ssl.create_default_context().wrap_socket(stream, server_hostname=host)
+        mark(stage)
+        stage = 'target_http'
+        path = '/ip' if host == 'ifconfig.me' else '/'
+        send(('GET '+path+' HTTP/1.1\r\nHost: '+host+'\r\nConnection: close\r\nUser-Agent: curl/8\r\n\r\n').encode())
+        stream.settimeout(remaining())
+        response = http.client.HTTPResponse(stream)
+        response.begin()
+        body = response.read(128).decode(errors='replace').strip()
+        mark(stage)
+        if response.status != 200:
+            return {'ok': False, 'stage': stage, 'host': host, 'elapsed': stages,
+                    'detail': '目标HTTP返回 '+str(response.status)}
+        stage = 'exit_verification'
+        if str(ipaddress.ip_address(body)) != str(ipaddress.ip_address(settings['expected_ip'])):
+            return {'ok': False, 'stage': stage, 'host': host, 'elapsed': stages,
+                    'detail': 'Webshare查询出口与预期IP不符'}
+        return {'ok': True, 'stage': 'complete', 'host': host, 'elapsed': stages}
+    except (OSError, ValueError, KeyError, TypeError, http.client.HTTPException) as error:
+        # Do not expose exception strings: they may include credentials or internal endpoints.
+        return {'ok': False, 'stage': stage, 'host': host, 'elapsed': stages,
+                'error_type': type(error).__name__}
+    finally:
+        if stream:
+            stream.close()
+
+
+def summarize_diagnostics(first, traces):
+    names = {'local_proxy': '服务器→本地Clash连接失败',
+        'first_to_webshare': '连接Webshare未完成（尚未核对实际第一跳路径）',
+        'webshare_socks': '第一跳→Webshare的SOCKS握手未完成',
+        'webshare_auth': 'Webshare代理认证失败或无响应',
+        'webshare_to_target': 'Webshare→目标网站连接失败（包含远端DNS）',
+        'target_tls': '目标网站TLS握手失败', 'target_http': '目标网站HTTP请求失败',
+        'exit_verification': '目标返回的出口IP无效或不符'}
+    lines = []
+    if first.get('ok') is True:
+        lines.append('第一跳独立探测：通过。')
+    elif first.get('ok') is False:
+        lines.append('第一跳独立探测：失败；可能是服务器到节点、节点出站/DNS或独立测试站，不能仅凭此确定物理故障位置。')
+    else:
+        lines.append('第一跳独立探测：不适用或无法确认。')
+    for trace in traces:
+        if trace.get('ok') is True:
+            lines.append(trace['host']+'：分段重测通过（SOCKS、认证、目标连接、TLS、HTTP及出口）。')
+        elif trace.get('ok') is None:
+            lines.append(trace['host']+'：'+trace.get('detail', '无法确认诊断路径')+'。')
+        else:
+            lines.append(trace['host']+'：'+names.get(trace.get('stage'), '无法定位')
+                +'；'+trace.get('detail', trace.get('error_type', '未知原因'))+'。')
+    if traces and all(item.get('ok') is True for item in traces):
+        lines.append('故障后重测已通过：原失败可能为瞬时异常或主探测路径差异，本次结果不能追溯确定原故障段；由下一轮正式检测决定恢复。')
+    return '\n'.join(lines)
+
+
+def collect_diagnostics(settings):
+    try:
+        config = yaml.safe_load(Path(settings['mihomo_config']).read_text())
+        proxies = diagnostic_api(settings, config, '/proxies')['proxies']
+        runtime = diagnostic_api(settings, config, '/configs')
+        rules = diagnostic_api(settings, config, '/rules')['rules']
+        candidates = {p['name'] for p in config.get('proxies', [])
+            if p.get('type') == 'socks5' and p.get('server') == settings['webshare_server']}
+        if not route_uses_webshare(str(runtime.get('mode', '')).lower(), proxies, rules,
+                candidates, settings['probe_host']):
+            return {'summary': '配置/模式问题：当前未确认使用Webshare第二跳（含只走第一跳）；不能据此判定物理网络断开。'}
+        selected_name = leaf('GLOBAL', proxies) if str(runtime.get('mode', '')).lower() == 'global' else None
+        if selected_name not in candidates:
+            for rule in rules:
+                if route_uses_webshare('rule', proxies, [rule], candidates, settings['probe_host']):
+                    selected_name = leaf(rule.get('proxy'), proxies)
+                    break
+        node = next(p for p in config.get('proxies', []) if p.get('name') == selected_name)
+        group = node.get('dialer-proxy')
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
+            first = pool.submit(first_hop_probe, settings, config, proxies, group) if group and group != 'DIRECT' else None
+            jobs = [pool.submit(trace_webshare, settings, config, proxies, node, host)
+                    for host in ('ifconfig.me', 'api.ipify.org')]
+            first_result = first.result() if first else {'ok': None, 'stage': 'first_hop'}
+            traces = [job.result() for job in jobs]
+        return {'summary': summarize_diagnostics(first_result, traces),
+                'first_hop': first_result, 'traces': traces}
+    except (OSError, ValueError, KeyError, TypeError, StopIteration, yaml.YAMLError):
+        return {'summary': '诊断无法读取Clash管理API或Webshare配置；请检查本机Clash服务/配置，尚不能判断远端链路。'}
+
+
+def diagnose(settings):
+    try:
+        result = subprocess.run([sys.executable, str(Path(__file__).resolve()),
+            '--config', settings.get('_config_path', '/etc/claude-webshare-watch/config.json'),
+            '--diagnose-only'], capture_output=True, text=True, timeout=18)
+        if result.returncode == 0:
+            return json.loads(result.stdout)
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        pass
+    return {'summary': '分段诊断超时或失败，无法确认具体链路；原有故障拦截保持生效。'}
+
 
 
 def process_info(pid):
@@ -268,6 +497,11 @@ def run(settings, probe_only=False):
                   else '已启用故障期间启动拦截，检测恢复后才解除；不会自动重启旧任务。')})
     state['pending_alerts'] = alerts
     atomic_json(path, state)
+    if action == 'incident':
+        # Block and stop first, persist the alert, then diagnose with a hard time limit.
+        state['diagnostics'] = dict(diagnose(settings), collected_at=time.time())
+        alerts[-1]['text'] += '\n分段诊断（故障后重测）：\n' + state['diagnostics']['summary']
+        atomic_json(path, state)
     # One delivery per run bounds notification time; preserve chronological events.
     if alerts:
         alert = alerts[0]
@@ -298,8 +532,13 @@ def main():
     parser.add_argument('--config', required=True)
     parser.add_argument('--probe-only', action='store_true', help='no state change, kill or notification')
     parser.add_argument('--guard', action='store_true', help='continuously stop Claude during failure')
+    parser.add_argument('--diagnose-only', action='store_true', help='read-only staged diagnostics; no gate, state, kill or notification')
     args = parser.parse_args()
     settings = json.loads(Path(args.config).read_text())
+    settings['_config_path'] = args.config
+    if args.diagnose_only:
+        print(json.dumps(collect_diagnostics(settings), ensure_ascii=False))
+        return 0
     if args.guard:
         return guard(settings)
     lock = Path(settings['state_path']).with_suffix('.lock')

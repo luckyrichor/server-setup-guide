@@ -6,7 +6,7 @@ After=network-online.target
 [Service]
 Type=oneshot
 ExecStart=/usr/bin/python3 /usr/local/libexec/claude-webshare-watch.py --config /etc/claude-webshare-watch/config.json
-TimeoutStartSec=55
+TimeoutStartSec=90
 UMask=0077
 NoNewPrivileges=true
 PrivateTmp=true
