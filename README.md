@@ -1,7 +1,7 @@
 # Server setup guide
 
 一台 Linux 服务器的网络、CLI agent、飞书连接与运维定时任务的脱敏部署手册。
-现场基线：2026-10-25；不包含业务项目清单、业务数据、账号、订阅 URL、Cookie 或密钥。
+现场基线：2026-10-26；不包含业务项目清单、业务数据、账号、订阅 URL、Cookie 或密钥。
 
 ## 从哪里开始
 
@@ -11,12 +11,13 @@
 4. 按 [定时任务清单](docs/timers.md) 安装需要的任务。
 5. 阅读 [第二跳监测](docs/webshare-watch.md)，填写私有参数后再启用自动停止。
 6. 对照 [验收与排错](docs/verification.md) 检查。
+7. 仅第二跳切换/直连超时问题参见 [故障原因、修复和证据](docs/incidents/2026-10-25-webshare-only-timeout.md)。
 
 ## 当前状态与边界
 
-- 已运行：Mihomo 三档分流、TUN/DNS、系统恢复控制、Tailscale 设备互联、两个 CLI 的飞书 bridge、运维 timers。
+- 已运行：服务器 Mihomo 仅第二跳（业务 TCP 经 Webshare，不经机场；系统维护例外保留）、TUN/DNS、系统恢复控制、Tailscale 设备互联、两个 CLI 的飞书 bridge、运维 timers。
 - 本仓库新增：每 30 秒检查 Webshare，首次故障停止当前 Claude CLI 进程树，附分段诊断私聊通知；故障期间 AppArmor 阻止已知安装路径启动，常驻 guard 持续清理 Claude；检测恢复时私聊通知并允许新任务，旧任务不自动重启。
-- **四模式 JS 是未启用草稿**。运行中的扩展仍是原三档版本；不能将草稿描述为服务器当前状态。
+- 现场四模式扩展已启用仅第二跳；历史三档与仅第二跳分别做过现场验证。仓库模板是脱敏参考，文件名中的 DRAFT 不代表当前生产状态；不能直接复制参数后宣称部署成功。
 - `templates/` 是配置参考，含 `serveruser`、`REPLACE_*` 与文档示例 IP。需替换后才可部署。
 - 本机验证与离线测试已做，**尚未在全新服务器端到端重建**，不是不分环境的一键安装器。
 - TUN 停止/回滚期间可能恢复系统直连；本仓库的轮询监测不是网络 kill switch。

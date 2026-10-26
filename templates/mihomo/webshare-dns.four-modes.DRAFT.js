@@ -35,8 +35,8 @@ const WEBSHARE = {
   "type": "socks5",
   "server": "192.0.2.10",
   "port": 7242,
-  "username": "uadhyqph",
-  "password": "4vzkccrexoyq",
+  "username": "REPLACE_WITH_WEBSHARE_USERNAME",
+  "password": "REPLACE_WITH_WEBSHARE_PASSWORD",
   "udp": false
 };
 

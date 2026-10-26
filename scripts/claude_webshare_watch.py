@@ -85,7 +85,7 @@ def check(settings):
                 rules, candidates, settings['probe_host']):
             return False, '当前模式未确认使用 Webshare（包含只走第一跳的情况）'
         # Same explicit local proxy + expected exit IP logic as .bashrc checkws.
-        result = subprocess.run(['curl', '-q', '-4', '-fsS', '--connect-timeout', '3',
+        result = subprocess.run(['curl', '-q', '-4', '-fsS', '--connect-timeout', '8',
             '--max-time', str(settings.get('probe_timeout', 10)), '--retry', '0',
             '--noproxy', '', '--proxy', settings['proxy_url'], settings['probe_url']],
             capture_output=True, text=True, timeout=settings.get('probe_timeout', 10) + 2)

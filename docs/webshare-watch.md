@@ -11,7 +11,7 @@
 
 1. 从私有 Mihomo 配置读取管理密钥，用 localhost API 查看运行 mode、proxies、rules。
 2. 核对活动规则存在通向对应 Webshare SOCKS5 的探测路径，不能只看到配置里有一个闲置 Webshare 节点就通过。
-3. 与 checkws 一样，强制 HTTP 本地代理请求 https://ifconfig.me/ip，IPv4，连接超时3秒、请求总超时10秒，无重试。
+3. 与 checkws 一样，强制 HTTP 本地代理请求 https://ifconfig.me/ip，IPv4，连接超时8秒、请求总超时由 probe_timeout 配置（当前现场20秒），无重试。
 4. 要求返回有效 IP 且与 expected_ip 完全一致；再检查一次运行模式仍具备 Webshare 路径。
 5. 无法确认/超时/认证失败/IP不符/只走第一跳均为失败。
 
@@ -156,3 +156,8 @@ sudo python3 /usr/local/libexec/claude-webshare-watch.py --config /etc/claude-we
 
 验证：13项单元测试通过，包括认证拒绝、SOCKS/目标连接/TLS/HTTP失败、路由未确认、诊断超时、先停止后诊断、脱敏输出及原故障/恢复状态机。
 现场只读诊断验证当前第一跳及两个站点的全部阶段正常；没有故意制造生产断网或终止真实Claude任务。
+
+
+## 2026-10-25 仅第二跳官方入口适配
+
+服务器改用经可信DNS和独立认证核验的Webshare官方Backbone网关；入口IP与出口IP不相同，watcher webshare_server必须匹配入口，expected_ip继续匹配原出口。主检测curl的连接预算包含TCP/TLS；实测3秒会误判正常但稍慢的连接，现为8秒，现场总预算20秒；checkws同步8/20。身份、出口、路由核对和故障门禁逻辑不变。此前独立分段诊断trace的时限未变。13项完整测试通过，最终连续三次现场主检测通过；入口实际值保存在私有配置，不写进公开模板。
