@@ -84,13 +84,31 @@ def check(settings):
         if not route_uses_webshare(str(runtime.get('mode', '')).lower(), proxies,
                 rules, candidates, settings['probe_host']):
             return False, '当前模式未确认使用 Webshare（包含只走第一跳的情况）'
-        # Same explicit local proxy + expected exit IP logic as .bashrc checkws.
-        result = subprocess.run(['curl', '-q', '-4', '-fsS', '--connect-timeout', '8',
-            '--max-time', str(settings.get('probe_timeout', 10)), '--retry', '0',
-            '--noproxy', '', '--proxy', settings['proxy_url'], settings['probe_url']],
-            capture_output=True, text=True, timeout=settings.get('probe_timeout', 10) + 2)
+        def request(url, budget):
+            return subprocess.run(['curl', '-q', '-4', '-fsS', '--connect-timeout', '8',
+                '--max-time', str(budget), '--retry', '0', '--noproxy', '',
+                '--proxy', settings['proxy_url'], url], capture_output=True, text=True,
+                timeout=budget + 2)
+
+        host = settings['probe_host']
+        result = request(settings['probe_url'], settings.get('probe_timeout', 10))
+        primary_code = result.returncode
         if result.returncode:
-            return False, 'Webshare 出口请求失败（curl返回码 '+str(result.returncode)+'：超时/连接/TLS/HTTP错误需分段诊断）'
+            if result.returncode not in (35, 56):
+                return False, 'Webshare 出口请求失败（curl返回码 '+str(result.returncode)+'；未触发TLS/接收错误复核）'
+            fallback = urllib.parse.urlsplit(settings.get('fallback_probe_url', 'https://api.ipify.org'))
+            if (fallback.scheme != 'https' or not fallback.hostname or fallback.username
+                    or fallback.password or fallback.hostname == host):
+                return False, '主探测curl返回码 '+str(primary_code)+'；独立复核站点配置无效'
+            host = fallback.hostname
+            if not route_uses_webshare(str(runtime.get('mode', '')).lower(), proxies,
+                    rules, candidates, host):
+                return False, '主探测curl返回码 '+str(primary_code)+'；备用站点未确认使用Webshare，不进行复核'
+            # One independent request only; never retry wrong exits or route failures.
+            result = request(fallback.geturl(), min(10, settings.get('probe_timeout', 10)))
+            if result.returncode:
+                return False, ('主探测curl返回码 '+str(primary_code)+'；独立站点复核也失败（curl返回码 '
+                    +str(result.returncode)+'），需分段诊断')
         try:
             actual = str(ipaddress.ip_address(result.stdout.strip()))
         except ValueError:
@@ -102,8 +120,10 @@ def check(settings):
         after_proxies = api('/proxies')['proxies']
         after_rules = api('/rules')['rules']
         if not route_uses_webshare(str(after_mode.get('mode', '')).lower(), after_proxies,
-                after_rules, candidates, settings['probe_host']):
+                after_rules, candidates, host):
             return False, '检测期间出口模式发生变化，未能确认第二跳'
+        if primary_code:
+            return True, '主探测curl返回码 '+str(primary_code)+'；独立站点复核Webshare出口通过'
         return True, 'Webshare 出口已确认'
     except (OSError, ValueError, KeyError, TypeError, subprocess.TimeoutExpired, yaml.YAMLError):
         return False, '无法读取或确认代理运行状态'
@@ -133,26 +153,19 @@ def first_hop_probe(settings, config, proxies, group):
 
 
 def trace_webshare(settings, config, proxies, node, host):
-    """Trace SOCKS over an existing, API-verified first-hop route. Never modify routing."""
+    """Trace a bound physical DIRECT route or an API-verified first-hop route."""
     start = time.monotonic()
     deadline = start + 8
     stages, stream = {}, None
     stage = 'local_proxy'
     group = node.get('dialer-proxy')
-    if not group or group == 'DIRECT':
-        return {'ok': None, 'stage': 'not_chained', 'host': host,
-                'detail': '只走第二跳：无第一跳，不适用经第一跳的握手诊断'}
+    direct = not group or group == 'DIRECT'
     try:
         try:
             server = str(ipaddress.ip_address(node['server']))
         except ValueError:
             return {'ok': None, 'stage': 'unsupported', 'host': host,
                     'detail': 'Webshare地址不是IP，暂不支持分离地址解析与连接诊断'}
-        url = urllib.parse.urlsplit(settings['proxy_url'])
-        if url.scheme != 'http' or url.username or url.password:
-            return {'ok': None, 'stage': 'unsupported', 'host': host, 'detail': '需无认证本机HTTP代理进行分段诊断'}
-        expected_first = leaf(group, proxies)
-
         def remaining():
             left = deadline - time.monotonic()
             if left <= 0:
@@ -176,32 +189,55 @@ def trace_webshare(settings, config, proxies, node, host):
         def mark(name):
             stages[name] = round(time.monotonic() - start, 3)
 
-        stream = socket.create_connection((url.hostname, url.port or 80), timeout=remaining())
-        source_port = stream.getsockname()[1]
-        mark('local_proxy')
-        stage = 'first_to_webshare'
-        authority = ('['+server+']' if ':' in server else server) + ':' + str(node['port'])
-        send(('CONNECT '+authority+' HTTP/1.1\r\nHost: '+authority+'\r\n\r\n').encode())
-        headers = b''
-        while not headers.endswith(b'\r\n\r\n'):
-            headers += receive(1)
-            if len(headers) > 8192:
-                raise ValueError()
-        if b' 200 ' not in headers.split(b'\r\n')[0]:
-            raise ConnectionError()
-        stage = 'route_confirmation'
-        chains = []
-        for attempt in range(4):
-            connections = diagnostic_api(settings, config, '/connections', timeout=remaining())['connections']
-            route = next((item for item in connections
-                if str(item.get('metadata', {}).get('sourcePort')) == str(source_port)), None)
-            chains = route.get('chains', []) if route else []
-            if chains:
-                break
-            time.sleep(0.05)  # CONNECT can precede registration in /connections.
-        if expected_first not in chains or node['name'] in chains:
-            return {'ok': None, 'stage': stage, 'host': host, 'elapsed': stages,
-                'detail': '诊断连接未确认沿同一第一跳，无法据此定位，不发送代理凭据'}
+        if direct:
+            stage = 'direct_route_confirmation'
+            interface = settings.get('direct_interface')
+            node_interface = node.get('interface-name') or config.get('interface-name')
+            if (not interface or interface == 'lo' or interface == config.get('tun', {}).get('device')
+                    or (node_interface and node_interface != interface)):
+                return {'ok': None, 'stage': stage, 'host': host,
+                    'detail': '仅第二跳诊断需要与节点一致的已核对物理网卡，不发送代理凭据'}
+            socket.if_nametoindex(interface)
+            stream = socket.socket(socket.AF_INET6 if ':' in server else socket.AF_INET, socket.SOCK_STREAM)
+            stream.setsockopt(socket.SOL_SOCKET, socket.SO_BINDTODEVICE, interface.encode()+b'\0')
+            if stream.getsockopt(socket.SOL_SOCKET, socket.SO_BINDTODEVICE, 64).rstrip(b'\0') != interface.encode():
+                return {'ok': None, 'stage': stage, 'host': host,
+                    'detail': '物理网卡绑定未确认，不发送代理凭据'}
+            stage = 'direct_to_webshare'
+            stream.settimeout(remaining())
+            stream.connect((server, int(node['port'])))
+            mark(stage)
+        else:
+            url = urllib.parse.urlsplit(settings['proxy_url'])
+            if url.scheme != 'http' or url.username or url.password:
+                return {'ok': None, 'stage': 'unsupported', 'host': host, 'detail': '需无认证本机HTTP代理进行分段诊断'}
+            expected_first = leaf(group, proxies)
+            stream = socket.create_connection((url.hostname, url.port or 80), timeout=remaining())
+            source_port = stream.getsockname()[1]
+            mark('local_proxy')
+            stage = 'first_to_webshare'
+            authority = ('['+server+']' if ':' in server else server) + ':' + str(node['port'])
+            send(('CONNECT '+authority+' HTTP/1.1\r\nHost: '+authority+'\r\n\r\n').encode())
+            headers = b''
+            while not headers.endswith(b'\r\n\r\n'):
+                headers += receive(1)
+                if len(headers) > 8192:
+                    raise ValueError()
+            if b' 200 ' not in headers.split(b'\r\n')[0]:
+                raise ConnectionError()
+            stage = 'route_confirmation'
+            chains = []
+            for attempt in range(4):
+                connections = diagnostic_api(settings, config, '/connections', timeout=remaining())['connections']
+                route = next((item for item in connections
+                    if str(item.get('metadata', {}).get('sourcePort')) == str(source_port)), None)
+                chains = route.get('chains', []) if route else []
+                if chains:
+                    break
+                time.sleep(0.05)
+            if expected_first not in chains or node['name'] in chains:
+                return {'ok': None, 'stage': stage, 'host': host, 'elapsed': stages,
+                    'detail': '诊断连接未确认沿同一第一跳，无法据此定位，不发送代理凭据'}
         stage = 'webshare_socks'
         send(b'\x05\x01\x02')
         if receive(2) != b'\x05\x02':
@@ -263,7 +299,9 @@ def trace_webshare(settings, config, proxies, node, host):
 def summarize_diagnostics(first, traces):
     names = {'local_proxy': '服务器→本地Clash连接失败',
         'first_to_webshare': '连接Webshare未完成（尚未核对实际第一跳路径）',
-        'webshare_socks': '第一跳→Webshare的SOCKS握手未完成',
+        'direct_route_confirmation': '仅第二跳物理网卡绑定失败或无法确认',
+        'direct_to_webshare': '服务器直连Webshare的TCP建连失败',
+        'webshare_socks': 'Webshare的SOCKS握手未完成',
         'webshare_auth': 'Webshare代理认证失败或无响应',
         'webshare_to_target': 'Webshare→目标网站连接失败（包含远端DNS）',
         'target_tls': '目标网站TLS握手失败', 'target_http': '目标网站HTTP请求失败',

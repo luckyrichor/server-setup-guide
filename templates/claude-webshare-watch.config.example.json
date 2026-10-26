@@ -4,7 +4,7 @@
   "proxy_url": "http://127.0.0.1:7890",
   "probe_host": "ifconfig.me",
   "probe_url": "https://ifconfig.me/ip",
-  "probe_timeout": 10,
+  "probe_timeout": 20,
   "expected_ip": "192.0.2.10",
   "webshare_server": "192.0.2.10",
   "state_path": "/var/lib/claude-webshare-watch/state.json",
@@ -18,5 +18,7 @@
     "LARK_CHANNEL_PROFILE": "codex",
     "LARK_CHANNEL_CONFIG": "REPLACE_BOUND_SOURCE_PROJECTION",
     "LARKSUITE_CLI_CONFIG_DIR": "/home/serveruser/.lark-channel/profiles/codex/lark-cli/lark-channel"
-  }
+  },
+  "fallback_probe_url": "https://api.ipify.org",
+  "direct_interface": "eth0"
 }
