@@ -38,6 +38,14 @@ bash -n templates/bashrc-infrastructure.sh
 - 最终文档与源码已进行秘密扫描；现场安装源码hash与仓库一致。
 - 新机器完整重建未验证；独立账号隐藏Clash方案未实施；四模式扩展未启用。
 
+## 进行中：仅第二跳发布（2026-10-26）
+
+用户已要求服务器切换为仅第二跳并用tx-mihomo-config-publish发布。服务器源JS的ONLY_SECOND_HOP已由false改为true，其他开关与凭据未变；原JS已在编辑前备份到服务器私有tx/backups/before-only-webshare-20261025-210439/。
+语法、skill --check、候选语义断言通过：单Webshare节点、dialer-proxy=DIRECT、无机场组/provider、业务TCP走Webshare、其他业务流量REJECT、业务DoH走Webshare，生成器仍保留10条系统DIRECT例外。
+**尚未--publish；实际运行仍是三档，版本93fc2ae432c6df04ea56e41afebda6d618be3df98920302f4bb60b204fe3e5b7。**
+等待用户确认VNC恢复入口可用及能执行第二出口全新SSH验收；当前仅在服务器执行，无法调用Mac备用验收。不要跳过skill的20分钟回滚保护/用户验收/--accept，也不要把源文件修改或预检查通过描述为已生效。手机配置不在本次服务器模式切换范围内。
+确认后从实际status复核开始继续发布；若用户取消应恢复备份JS，不能假定源与active一致。
+
 ## 下一步/维护
 
 1. 更改网络配置后同步 watcher 的 Webshare server/expected_ip，并先执行 --probe-only。
