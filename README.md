@@ -55,3 +55,5 @@ bash -n templates/bashrc-infrastructure.sh
 
 飞书留档采用 Codex profile、用户身份，目录 `我的文档库/server-setup-guide`。
 公开仓库不保存私人知识库 URL；本机 `.feishu-links.json`（已忽略）记录实际链接。
+
+设备别名、Claude 访问限制及三台活动全局规则的同步范围见 [设备连接与助手访问边界](docs/agent-remote-access.md)。

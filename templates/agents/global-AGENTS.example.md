@@ -296,3 +296,10 @@ agent(或人)只读这份文档,就能弄清项目是什么、做到哪了、怎
 - 不以 Codex 的汇报为准。Claude 要亲自查看改动内容，运行测试和检查命令，逐条对照方案或任务要求。
 - 不通过的话，退回 Codex 修改，或者 Claude 自己修正，直到达标。
 - 最后向用户报告结果：是否达到要求、怎么验证的、遗留问题。同时写进项目的 `AGENTS.md` 和飞书开发记录，注明哪些是 Codex 做的、哪些是 Claude 改的。
+
+
+## 设备与 SSH 连接约定及 Claude 远程访问限制
+
+**设备与 SSH 连接约定**：当前有 Mac、Windows 和服务器三台设备，分别通过 `ssh luomac`、`ssh luowindows` 和 `ssh tx` 连接。执行远程操作前，应先确认目标设备，并核对连接后的主机身份，避免在错误的设备上操作。
+
+**Claude 远程访问限制**：不允许 Claude 直接访问或操作服务器和 Windows，包括通过 `ssh tx`、`ssh luowindows` 或其他连接方式访问这两台设备。需要在服务器或 Windows 上完成的任务，由 Claude 交给 Codex 执行；Codex 负责连接目标设备并执行操作，Claude 负责指导与验收。

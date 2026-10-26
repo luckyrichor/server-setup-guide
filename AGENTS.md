@@ -30,6 +30,8 @@ bash -n templates/bashrc-infrastructure.sh
 
 ## 当前进度
 
+- 2026-10-26：Mac、TX、Windows 活动全局规则已增补设备连接及 Claude 访问限制，三台备份/逐字节回读核对通过；详情见 [docs/agent-remote-access.md](docs/agent-remote-access.md)。本次 GitHub/飞书同步进度由本机忽略文件 `.feishu-links.json` 跟踪，交付前须核对。
+
 - 已完成基础文档、脱敏模板和监测源码。
 - watcher 已安装启用，现场出口检测通过；目标私聊故障及恢复通知已用隔离状态演练验证，持续正常不重复通知。
 - 自动化测试22项通过，真实kill仅针对测试sleep进程；生产未做断网注入。
@@ -85,6 +87,8 @@ AppArmor门禁覆盖npm原生CLI和标准独立安装路径，复制/改名到�
 
 ## 更新日志
 
+- 2026-10-26：Codex 按用户确认同步三台设备全局规则，新增设备连接/Claude访问边界说明，更新全局模板和历史快照范围说明；CLAUDE.md 引用保持不变。文档检查及三台回读通过，未做系统权限隔离或真实Claude拦截测试。
+
 - 2026-10-26：归档Mac全局指令正文与Claude引用；新增公开脱敏快照、私有原样副本和hash清单，核对33个标题完整性，更新全局记忆说明并同步GitHub/飞书。
 
 - 2026-10-26：按用户允许增加35/56单轮独立复核；修复DIRECT诊断跳过；22项测试、真实只读分段验证及独立复核通过。
@@ -104,3 +108,12 @@ AppArmor门禁覆盖npm原生CLI和标准独立安装路径，复制/改名到�
 - 2026-10-25（纽约时间）：Codex修复仅第二跳直连并通过用户第二出口SSH验收保留；更新当前状态，真实私聊新消息已由用户验收正常；本版本重启仍未验收。
 
 先前修复已记录于 TX Clash 开发记录；2026-10-26 的本项目复盘同步到“我的文档库/server-setup-guide”的既有开发记录。两处实际链接保存在已忽略的 .feishu-links.json，公开仓库不放私人知识库链接。
+
+
+## 当前设备连接与助手访问边界（2026-10-26）
+
+**设备与 SSH 连接约定**：当前有 Mac、Windows 和服务器三台设备，分别通过 `ssh luomac`、`ssh luowindows` 和 `ssh tx` 连接。执行远程操作前，应先确认目标设备，并核对连接后的主机身份，避免在错误的设备上操作。
+
+**Claude 远程访问限制**：不允许 Claude 直接访问或操作服务器和 Windows，包括通过 `ssh tx`、`ssh luowindows` 或其他连接方式访问这两台设备。需要在服务器或 Windows 上完成的任务，由 Claude 交给 Codex 执行；Codex 负责连接目标设备并执行操作，Claude 负责指导与验收。
+
+本规则优先于历史的一般协作描述；Claude 验收服务器/Windows任务时应依据Codex提供的证据，不直接连接目标设备。历史Mac快照保留，新约定见 docs/agent-remote-access.md。
