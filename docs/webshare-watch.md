@@ -102,7 +102,7 @@ sudo mv /etc/apparmor.d/claude-webshare-gate /etc/claude-webshare-watch/gate.dis
 ## 验证与局限
 
 - 单元测试覆盖规则模式、首跳模式、GLOBAL、持续故障重复停止、恢复解除门禁、门禁失败继续停止、probe-only不改门禁、恢复重新布防、通知重试、PID复用保护。
-- 7项单元测试通过；隔离测试用复制的true程序及实际Claude原生二进制验证门禁拒绝启动、卸载后正常启动；加载测试使用与生产相同的NoNewPrivileges/ProtectSystem约束。
+- 8项单元测试通过；隔离测试用复制的true程序及实际Claude原生二进制验证门禁拒绝启动、卸载后正常启动；加载测试使用与生产相同的NoNewPrivileges/ProtectSystem约束。
 - 真实 SIGKILL 只在测试创建的 sleep 子进程验证，没有人为制造生产断网或停止用户真实任务。
 - 现场 probe-only 和启用后定时运行均确认 Webshare出口，通知在目标私聊实测成功。
 - 30 秒为 timer 周期；检测/调度耗时叠加，不能保证故障瞬间停止。服务不并发运行，繁忙或通知超时会延迟后续轮次。
@@ -115,3 +115,12 @@ sudo mv /etc/apparmor.d/claude-webshare-gate /etc/claude-webshare-watch/gate.dis
 故障和恢复事件按时间顺序写入状态文件，兼容旧版 pending_alert；每轮最多发送一条，以免超过服务超时。
 发送失败保留队列，下一轮使用同一幂等键重试。若故障通知积压，恢复通知会延后发送。
 不自动重启旧任务，不重放被拒绝的任务。8项单元测试覆盖恢复通知、失败重试和持续健康不重复通知。
+
+## 2026-10-26 实测记录（北京时间）
+
+- 手动触发已安装的 `claude-webshare-watch.service`，Result=success、ExecMainStatus=0，实际 Webshare 出口检测正常。
+- `claude-webshare-watch.timer` 与 `claude-webshare-guard.service` 均 active。
+- 使用临时状态文件模拟故障、恢复、持续正常；替换检测、门禁和进程终止操作，仅复用已安装脚本的真实飞书发送链路。
+- 当前私聊中的故障和恢复两条演练消息发送成功，均标明“演练测试，非真实故障”。第三次持续正常检查没有重复发送。
+- 本次未切断生产网络、未更改生产门禁或健康状态、未停止真实 Claude 任务。此演练验证状态转换与通知链路，不等同于生产断网验收。
+- 8项自动化测试再次通过；旧任务不自动重启的行为保留。
