@@ -11,7 +11,8 @@
 4. 按 [定时任务清单](docs/timers.md) 安装需要的任务。
 5. 阅读 [第二跳监测](docs/webshare-watch.md)，填写私有参数后再启用自动停止。
 6. 对照 [验收与排错](docs/verification.md) 检查。
-7. 仅第二跳切换/直连超时问题参见 [故障原因、修复和证据](docs/incidents/2026-10-25-webshare-only-timeout.md)。
+7. Mac全局约定归档和服务器规则的区别见 [全局记忆与交接](docs/global-memory.md)。
+8. 仅第二跳切换/直连超时问题参见 [故障原因、修复和证据](docs/incidents/2026-10-25-webshare-only-timeout.md)。
 
 ## 当前状态与边界
 

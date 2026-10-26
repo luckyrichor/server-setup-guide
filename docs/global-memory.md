@@ -33,3 +33,34 @@ printf '@~/.codex/AGENTS.md\n' > ~/.claude/CLAUDE.md
 
 独立账号+禁止路径列表隔离 Claude 的方案尚未实施；当前 bridge 使用普通服务器账号和高权限 CLI 策略。
 不能把一段“不要读取”的提示词当作操作系统访问控制，也不能同时保留任意root能力并保证禁止访问指定文件。
+
+
+## Mac 全局记忆归档（2026-10-26）
+
+本次“全局记忆”指 Mac 的全局指令正文 `~/.codex/AGENTS.md` 及 Claude 引用 `~/.claude/CLAUDE.md`。它们是用户维护的偏好、协作和交接规则；自动生成的历史摘要、聊天会话和认证文件不属于本次归档。
+
+### 归档文件
+
+| 位置 | 内容与用途 |
+|---|---|
+| `templates/agents/mac-global-AGENTS.example.md` | Mac 正文的完整脱敏快照，保留33个实际Markdown标题及对应规则，Mac账号路径、助手显示名和业务项目举例概括 |
+| `templates/agents/mac-global-CLAUDE.example.md` | 保留原始 `@~/.codex/AGENTS.md` 单行引用，避免双份正文 |
+| `templates/agents/mac-global-memory.manifest.json` | 原件和公开副本的字节数、SHA256、来源类型、日期、脱敏范围与标题覆盖数 |
+| `private/mac-global-memory/2026-10-26/` | 服务器项目内的原样私有副本和来源清单，已Git忽略；目录0700、文件0600 |
+
+私有原件保留原文；公开快照只做明确的路径/名称脱敏，不删减协作、交接、文档等规则。内容包括新项目根目录确认、中文回复、个人材料位置指引、产品可视化和技术文档、AGENTS/CLAUDE交接、飞书同步/署名/身份、Claude与Codex分工及阶段耗时记录、Android USB/MTP/ADB排查和Mac钥匙串API注入约定。个人材料文件夹正文、真实密钥及手机私有凭据没有随归档复制。
+
+### 完整性与适用范围
+
+- Mac正文原件29366字节，Claude引用原件20字节；服务器私有副本逐文件SHA256与Mac来源相同。
+- 公开正文保留全部33个实际Markdown标题（不将代码围栏中的Shell注释计作标题）；逐标题顺序核对。完整hash见manifest，不能期待脱敏副本与原文hash相同。
+- 该快照记录Mac环境：`/Users/USERNAME/Project`、macOS钥匙串、Homebrew、Android SDK路径等不是Linux部署路径；采纳前须结合目标机器审阅。
+- 本次同步是向本项目归档，不将Mac规则自动安装到服务器 `~/.codex/AGENTS.md`、`~/.claude/CLAUDE.md` 或 `~/AGENTS.md`。服务器原有 `global-AGENTS.example.md` / `home-AGENTS.example.md` 保留，各来源不混写。
+- Mac原件及本项目根AGENTS/CLAUDE各司其职，根CLAUDE仍为`@AGENTS.md`；不要把归档快照当作本项目接手进度。
+
+### 以后如何同步
+
+1. 重新读取Mac来源并记录hash，先比较变化；不得根据旧摘要声称已同步最新内容。
+2. 在项目私有忽略目录保存原样副本，权限保持0700/0600；公开模板只放已核对的脱敏快照。
+3. 更新manifest、完整性记录及根AGENTS进度，检查私有原件不在Git索引中。
+4. 通过秘密扫描后提交、推送，核对远端提交，再向本项目既有飞书开发记录追加出处、提交哈希、归档范围和验证结果；旧飞书内容保留。

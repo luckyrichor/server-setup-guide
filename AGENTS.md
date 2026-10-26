@@ -58,6 +58,12 @@ bash -n templates/bashrc-infrastructure.sh
 
 旧实现新增回归4项失败，修复后全量22项通过；独立代码复核通过。现场只读DIRECT两站点均完成全部阶段；生产断网和真实Claude终止未人为注入。首次故障仍可能是真实瞬时链路或目标TLS异常，不能声称已定位供应商内部根因。
 
+## 2026-10-26：Mac全局记忆同步
+
+已将Mac全局指令正文和Claude引用归档到本项目：公开完整脱敏快照为templates/agents/mac-global-AGENTS.example.md、mac-global-CLAUDE.example.md；manifest记录来源和两侧hash；私有原样文件保存在private/mac-global-memory/2026-10-26（Git忽略，0700/0600）。正文29366字节、引用20字节，源/私有副本hash一致，公开正文33个标题和顺序全部保留。详细范围见docs/global-memory.md。
+
+本次归档不等于安装到服务器活动全局规则；原有服务器模板保留。公开快照概括本机账号路径、助手显示名和业务项目示例，私有副本保留原文；不复制认证、会话或自动历史摘要。Mac专用路径和钥匙串机制部署到Linux前需审阅。项目根CLAUDE.md仍只引用AGENTS.md。
+
 ## 下一步/维护
 
 1. 更改网络配置后同步 watcher 的 Webshare server/expected_ip，并先执行 --probe-only。
@@ -78,6 +84,8 @@ AppArmor门禁覆盖npm原生CLI和标准独立安装路径，复制/改名到�
 模板中占位符需替换；源文件仅脱敏参考，新机尚未端到端测试。
 
 ## 更新日志
+
+- 2026-10-26：归档Mac全局指令正文与Claude引用；新增公开脱敏快照、私有原样副本和hash清单，核对33个标题完整性，更新全局记忆说明并同步GitHub/飞书。
 
 - 2026-10-26：按用户允许增加35/56单轮独立复核；修复DIRECT诊断跳过；22项测试、真实只读分段验证及独立复核通过。
 

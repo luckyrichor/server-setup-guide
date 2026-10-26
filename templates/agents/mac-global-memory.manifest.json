@@ -1,0 +1,30 @@
+{
+  "snapshot_date": "2026-10-26",
+  "timezone": "America/New_York",
+  "scope": "Mac global instruction files; project archival snapshot",
+  "files": [
+    {
+      "source": "~/.codex/AGENTS.md",
+      "source_sha256": "57f1881d38d6d05e196713fd8fe5717778e29a5023fb53782650533f0ec9483e",
+      "source_bytes": 29366,
+      "public_file": "mac-global-AGENTS.example.md",
+      "public_sha256": "c51138ae42f0958081c6198703ef3dfb913adbb72e079fdbfab8597384b1b9d5",
+      "public_bytes": 29592
+    },
+    {
+      "source": "~/.claude/CLAUDE.md",
+      "source_sha256": "38a1085f3a53b4027ff2e96fad50daa2c372c17f5fcf0f973298316435e2ead1",
+      "source_bytes": 20,
+      "public_file": "mac-global-CLAUDE.example.md",
+      "public_sha256": "38a1085f3a53b4027ff2e96fad50daa2c372c17f5fcf0f973298316435e2ead1",
+      "public_bytes": 20
+    }
+  ],
+  "preserved_heading_count": 33,
+  "sanitization": [
+    "Mac account path generalized",
+    "assistant display names generalized",
+    "business project examples generalized"
+  ],
+  "private_snapshot_gitignored": true
+}
