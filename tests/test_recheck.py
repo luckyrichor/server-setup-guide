@@ -24,7 +24,7 @@ class RecheckTests(unittest.TestCase):
         self.settings = {'mihomo_config': str(config), 'controller': 'http://127.0.0.1:19090',
             'webshare_server': '192.0.2.10', 'expected_ip': '192.0.2.20',
             'proxy_url': 'http://127.0.0.1:7890', 'probe_host': 'ifconfig.me',
-            'probe_url': 'https://ifconfig.me/ip', 'fallback_probe_url': 'https://api.ipify.org'}
+            'probe_url': 'https://ifconfig.me/ip', 'fallback_probe_url': 'https://ipinfo.io/ip'}
         self.rules = [{'type': 'Network', 'payload': 'tcp', 'proxy': 'ws'}]
         self.rules_reads = 0
         self.change_after = False
@@ -62,6 +62,12 @@ class RecheckTests(unittest.TestCase):
         self.assertTrue(result[0])
         self.assertEqual(len(calls), 2)
         self.assertNotEqual(calls[0].args[0][-1], calls[1].args[0][-1])
+
+    def test_timeout_uses_one_independent_recheck(self):
+        result, calls = self.run_probe([self.reply(28, ''), self.reply()])
+        self.assertTrue(result[0])
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[1].args[0][-1], 'https://ipinfo.io/ip')
 
     def test_second_failure_remains_unhealthy_without_unbounded_retry(self):
         result, calls = self.run_probe([self.reply(35, ''), self.reply(56, '')])

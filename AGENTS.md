@@ -117,3 +117,13 @@ AppArmor门禁覆盖npm原生CLI和标准独立安装路径，复制/改名到�
 **Claude 远程访问限制**：不允许 Claude 直接访问或操作服务器和 Windows，包括通过 `ssh tx`、`ssh luowindows` 或其他连接方式访问这两台设备。需要在服务器或 Windows 上完成的任务，由 Claude 交给 Codex 执行；Codex 负责连接目标设备并执行操作，Claude 负责指导与验收。
 
 本规则优先于历史的一般协作描述；Claude 验收服务器/Windows任务时应依据Codex提供的证据，不直接连接目标设备。历史Mac快照保留，新约定见 docs/agent-remote-access.md。
+
+## 2026-10-27：第二跳告警防抖与复核修复（已安装）
+
+现场备用站点此前仍为只走第一跳的api.ipify.org，已有35/56复核代码因路由校验而跳过。现将私有配置和公开模板改为名单内的https://ipinfo.io/ip；主站28/35/56同轮最多一次独立复核，核对路由与固定出口，错误出口/错误模式不重试放行。
+
+最终检测失败仍立即加载门禁并持续清理Claude；通知独立延迟alert_delay_seconds=90。持续故障只告警一次；未达90秒即恢复的只记本机状态/日志，不发故障和恢复消息。故障后recovery_successes=2连续成功才解除门禁，首次成功仍持续清理；失败重置成功计数。只有已进入告警队列的故障生成恢复通知，离线通知保持先故障后恢复、幂等重试。已停止任务不自动重启。分段诊断推迟到告警阈值后，避免每次短暂波动运行诊断。旧状态迁移保留已告警故障恢复通知。
+
+变更scripts/claude_webshare_watch.py、templates/claude-webshare-watch.config.example.json及tests；详见docs/webshare-watch-alert-delay.md。32项测试通过，含真实sleep子进程终止测试；未断开生产网络或停止真实Claude任务。现场只读复核演练仅在内存模拟主站curl35，实际备用请求通过Webshare且出口匹配；实际健康probe通过。部署私有备份位于/var/backups/claude-webshare-watch/20261027-011221，已安装脚本与仓库SHA256一致，timer和guard均active。Clash配置未修改。
+
+新版timer已实际执行完成且健康；代码提交并同步GitHub，飞书开发记录按同项目既有授权追加并回查。实际版本与同步链接见私有.feishu-links.json。CLAUDE.md继续仅引用AGENTS.md。

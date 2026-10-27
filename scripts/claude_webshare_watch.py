@@ -94,9 +94,9 @@ def check(settings):
         result = request(settings['probe_url'], settings.get('probe_timeout', 10))
         primary_code = result.returncode
         if result.returncode:
-            if result.returncode not in (35, 56):
-                return False, 'Webshare 出口请求失败（curl返回码 '+str(result.returncode)+'；未触发TLS/接收错误复核）'
-            fallback = urllib.parse.urlsplit(settings.get('fallback_probe_url', 'https://api.ipify.org'))
+            if result.returncode not in (28, 35, 56):
+                return False, 'Webshare 出口请求失败（curl返回码 '+str(result.returncode)+'；未触发超时/TLS/接收错误复核）'
+            fallback = urllib.parse.urlsplit(settings.get('fallback_probe_url', 'https://ipinfo.io/ip'))
             if (fallback.scheme != 'https' or not fallback.hostname or fallback.username
                     or fallback.password or fallback.hostname == host):
                 return False, '主探测curl返回码 '+str(primary_code)+'；独立复核站点配置无效'
@@ -494,9 +494,20 @@ def run(settings, probe_only=False):
         previous = json.loads(path.read_text())
     except (OSError, ValueError):
         previous = {}
-    action = decision(previous, healthy)
-    state = dict(previous, checked_at=time.time(), healthy=healthy, reason=reason)
-    # Publish recovery before unloading: the fallback must not kill newly allowed tasks.
+    now = time.time()
+    probe_healthy = healthy
+    # Old incidents were immediately announced; preserve their recovery semantics.
+    if previous.get('incident') and 'alert_queued' not in previous:
+        previous.update(alert_queued=True, failure_started_at=previous.get('checked_at', now))
+    state = dict(previous, checked_at=now, probe_healthy=probe_healthy, reason=reason)
+    successes = previous.get('recovery_successes', 0) + 1 if probe_healthy else 0
+    state['recovery_successes'] = successes
+    if previous.get('incident') and probe_healthy:
+        healthy = successes >= max(1, int(settings.get('recovery_successes', 2)))
+        if not healthy:
+            state['reason'] = '第二跳探测通过，等待连续成功确认；启动拦截仍保持'
+    state['healthy'] = healthy
+    # Publish effective recovery before unloading: guard must not kill newly allowed tasks.
     if healthy:
         atomic_json(path, state)
     try:
@@ -504,41 +515,50 @@ def run(settings, probe_only=False):
         state.pop('gate_error', None)
         state['gate_blocked'] = not healthy
     except (OSError, RuntimeError, subprocess.TimeoutExpired):
-        healthy = False
+        healthy = probe_healthy = False
         reason = '启动门禁更新失败；持续终止 Claude，需管理员检查 AppArmor'
-        action = decision(previous, healthy)
-        state.update(healthy=False, reason=reason, gate_error=True)
+        state.update(healthy=False, probe_healthy=False, recovery_successes=0,
+                     reason=reason, gate_error=True)
+    action = decision(previous, healthy)
     alerts = state.pop('pending_alerts', [])
-    # Migrate a pending notification written by the previous installed version.
     legacy = state.pop('pending_alert', None)
     if legacy:
         alerts.append(legacy)
     if action == 'healthy':
         state['incident'] = False
-        if previous.get('incident'):
+        if previous.get('incident') and previous.get('alert_queued'):
+            # A queued failure stays ahead of its recovery even if delivery was unavailable.
             alerts.append({
                 'id': str(previous.get('incident_id', time.time_ns())) + '-recovered',
-                'text': 'Claude 网络第二跳已恢复：Webshare 出口检测通过，启动拦截已解除。'
+                'text': 'Claude 网络第二跳已恢复：连续成功确认 Webshare 出口，启动拦截已解除。'
                     '现在可以运行新的 Claude CLI 任务；此前停止的任务不会自动重启。'})
+        for key in ('failure_started_at', 'alert_queued', 'incident_text', 'diagnostics'):
+            state.pop(key, None)
     else:
         targets = snapshot()
         killed, failed = kill_snapshot(targets)
         state.update(last_killed=killed, kill_failed=failed)
     if action == 'incident':
         incident_id = str(time.time_ns())
-        state.update(incident=True, incident_id=incident_id, killed=killed, kill_failed=failed)
-        alerts.append({
-            'id': incident_id,
-            'text': 'Claude 网络第二跳检测失败：'+reason+'。已停止当时的 Claude CLI 及子进程 '
-                +str(len(killed))+' 个；停止失败 '+str(len(failed))+' 个。'
-                +('启动门禁异常，正在持续清理新进程；请检查 AppArmor。' if state.get('gate_error')
-                  else '已启用故障期间启动拦截，检测恢复后才解除；不会自动重启旧任务。')})
+        state.update(incident=True, incident_id=incident_id, killed=killed, kill_failed=failed,
+                     failure_started_at=now, alert_queued=False)
+        state.pop('diagnostics', None)
+        state['incident_text'] = (
+            'Claude 网络第二跳检测失败：'+reason+'。首次失败时已停止 Claude CLI 及子进程 '
+            +str(len(killed))+' 个；停止失败 '+str(len(failed))+' 个。'
+            +('启动门禁异常，正在持续清理新进程；请检查 AppArmor。' if state.get('gate_error')
+              else '已启用故障期间启动拦截，连续成功确认恢复后才解除；不会自动重启旧任务。'))
     state['pending_alerts'] = alerts
     atomic_json(path, state)
-    if action == 'incident':
-        # Block and stop first, persist the alert, then diagnose with a hard time limit.
+    if (not healthy and not probe_healthy and not state.get('alert_queued')
+            and now - state['failure_started_at'] >= max(0, float(settings.get('alert_delay_seconds', 90)))):
+        # Protection already applied; diagnostics and outward alerts are delayed independently.
         state['diagnostics'] = dict(diagnose(settings), collected_at=time.time())
-        alerts[-1]['text'] += '\n分段诊断（故障后重测）：\n' + state['diagnostics']['summary']
+        alerts.append({
+            'id': state['incident_id'],
+            'text': state['incident_text'] + '\n故障尚未恢复，最新检测：' + reason
+                + '\n分段诊断（故障后重测）：\n' + state['diagnostics']['summary']})
+        state['alert_queued'] = True
         atomic_json(path, state)
     # One delivery per run bounds notification time; preserve chronological events.
     if alerts:

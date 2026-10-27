@@ -31,7 +31,7 @@ class WatchTests(unittest.TestCase):
 
     def test_continuous_kill_until_recovery_and_no_restart(self):
         with tempfile.TemporaryDirectory() as tmp:
-            settings={'state_path':str(Path(tmp)/'state.json')}
+            settings={'state_path':str(Path(tmp)/'state.json'), 'alert_delay_seconds':0, 'recovery_successes':1}
             with patch.object(watch,'check',return_value=(False,'test failure')), \
                  patch.object(watch,'snapshot',return_value=[]) as snap, \
                  patch.object(watch,'kill_snapshot',return_value=([],[])) as kill, \
@@ -49,7 +49,7 @@ class WatchTests(unittest.TestCase):
 
     def test_failed_alert_retried_even_after_recovery(self):
         with tempfile.TemporaryDirectory() as tmp:
-            settings={'state_path':str(Path(tmp)/'state.json')}
+            settings={'state_path':str(Path(tmp)/'state.json'), 'alert_delay_seconds':0, 'recovery_successes':1}
             with patch.object(watch,'check',return_value=(False,'failure')), \
                  patch.object(watch,'snapshot',return_value=[]), \
                  patch.object(watch,'kill_snapshot',return_value=([],[])) as kill, \
@@ -63,7 +63,7 @@ class WatchTests(unittest.TestCase):
     def test_recovery_notifies_once_and_retries_without_killing(self):
         import json
         with tempfile.TemporaryDirectory() as tmp:
-            settings={'state_path':str(Path(tmp)/'state.json')}
+            settings={'state_path':str(Path(tmp)/'state.json'), 'alert_delay_seconds':0, 'recovery_successes':1}
             with patch.object(watch,'check',return_value=(True,'ok')), \
                  patch.object(watch,'snapshot',return_value=[]), \
                  patch.object(watch,'kill_snapshot',return_value=([],[])) as kill, \
@@ -84,7 +84,7 @@ class WatchTests(unittest.TestCase):
     def test_gate_failure_keeps_claude_blocked_and_stopped(self):
         import json
         with tempfile.TemporaryDirectory() as tmp:
-            settings={'state_path':str(Path(tmp)/'state.json')}
+            settings={'state_path':str(Path(tmp)/'state.json'), 'alert_delay_seconds':0, 'recovery_successes':1}
             with patch.object(watch,'check',return_value=(True,'ok')), \
                  patch.object(watch,'set_gate',side_effect=RuntimeError('gate failure')), \
                  patch.object(watch,'snapshot',return_value=[]), \
@@ -102,7 +102,7 @@ class WatchTests(unittest.TestCase):
     def test_diagnosis_happens_after_stop_and_persist(self):
         import json
         with tempfile.TemporaryDirectory() as tmp:
-            settings={'state_path':str(Path(tmp)/'state.json')}
+            settings={'state_path':str(Path(tmp)/'state.json'), 'alert_delay_seconds':0, 'recovery_successes':1}
             with patch.object(watch,'check',return_value=(False,'failure')), \
                  patch.object(watch,'snapshot',return_value=[]), \
                  patch.object(watch,'kill_snapshot',return_value=([],[])) as kill, \
